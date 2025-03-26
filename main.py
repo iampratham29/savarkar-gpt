@@ -1,57 +1,47 @@
+import ethical_layer
+from flask import Flask, request, jsonify
 import pdf_loader
 import embedding_utils
-import ethical_layer
-import config
 from chromadb.errors import InvalidCollectionException
 
-def main():
-    """Main function to orchestrate the process."""
-    pdf_path = "Essentials of Hindutva.pdf"  # Replace with the path to your PDF
-    collection_name = "my_knowledge_base"  # Name for your ChromaDB collection
+app = Flask(__name__)
 
-    # 1. Load and Chunk the PDF
+# Initialize ChromaDB collection
+pdf_path = "Essentials of Hindutva.pdf"
+collection_name = "my_knowledge_base"
+
+embedding_manager = embedding_utils.EmbeddingManager()
+
+try:
     pdf_text = pdf_loader.get_pdf_text(pdf_path)
     if pdf_text is None:
-        return  # Exit if PDF loading failed
-
+        raise Exception("Failed to load the PDF.")
     text_chunks = pdf_loader.split_text_into_chunks(pdf_text)
-
-    # 2. Initialize Embedding Manager and Create/Load Chroma Collection
-    embedding_manager = embedding_utils.EmbeddingManager()
-    try:
-        collection = embedding_manager.create_collection(collection_name)
-    except InvalidCollectionException:
-    # If the collection doesn't exist, create it
-        collection = embedding_manager.chroma_client.create_collection(
-        name=collection_name, embedding_function=embedding_manager.embedding_function
-        )
-
-    # 3. Add Chunks to the Chroma Collection (if it's empty)
-    if collection.count() == 0: # Check if collection is empty
+    collection = embedding_manager.create_collection(collection_name)
+    if collection.count() == 0:
         embedding_manager.add_to_collection(collection, text_chunks, [f"doc_{i}" for i in range(len(text_chunks))])
-        print("Added documents to the collection.")
-    else:
-        print("Collection already contains documents. Skipping addition.")
+except InvalidCollectionException:
+    collection = embedding_manager.chroma_client.create_collection(
+        name=collection_name, embedding_function=embedding_manager.embedding_function
+    )
 
+# API Endpoint for querying the bot
+@app.route("/query", methods=["POST"])
+def query_bot():
+    data = request.get_json()
+    query = data.get("query", "")
+    if not query:
+        return jsonify({"error": "Query is required"}), 400
 
-    # 4.  User Interaction Loop
-    while True:
-        query = input("Ask a question (or type 'exit'): ")
-        if query.lower() == "exit":
-            break
+    # Query the collection
+    results = embedding_manager.query_collection(collection, query)
+    context = "\n".join([" ".join(doc) if isinstance(doc, list) else doc for doc in results['documents']])
+    prompt = f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
 
-        # 5. Retrieve Relevant Documents
-        results = embedding_manager.query_collection(collection, query)
-        # Flatten the list of lists into a single list of strings
-        context = "\n".join([" ".join(doc) if isinstance(doc, list) else doc for doc in results['documents']])
-
-        # 6. Create Prompt for Ollama
-
-        prompt = f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
-
-        # 7. Generate Response with Ethical Constraints
-        response = ethical_layer.generate_safe_response(prompt)
-        print(f"Answer: {response}\n")
+    # answer = f"[Your bot's response to '{query}']"  # Replace with your bot's logic
+    answer = ethical_layer.generate_safe_response(prompt)
+        
+    return jsonify({"context": context, "answer": answer})
 
 if __name__ == "__main__":
-    main()
+    app.run(debug=True)
