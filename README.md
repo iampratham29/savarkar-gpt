@@ -67,6 +67,8 @@ The UI will be available at `http://localhost:8501`.
 
 ## 🧠 How It Works
 
+![Screenshot](Screenshot.png)
+
 ### 📖 PDF Processing
 - `pdf_loader.py` extracts text from Savarkar's books and splits it into manageable chunks.
 
